@@ -76,7 +76,7 @@ async function parseGradeFromText(gradeText) {
 // ─── Format grade ─────────────────────────────────────────────────────────────
 function formatGradeMessage(grade) {
   if (grade.erro) return `❌ ${grade.erro}`;
-  let msg = `📚 <b>Grade detectada!</b>\n`;
+  let msg = `📚 <b>Grade Detectada!</b>\n`;
   if (grade.curso) msg += `🎓 ${grade.curso}\n`;
   if (grade.semestre) msg += `📅 ${grade.semestre}\n`;
   msg += '\n';
