@@ -55,16 +55,23 @@ async function parseGradeFromText(gradeText) {
     'Você extrai grades horárias de texto livre e retorna SOMENTE JSON válido, sem markdown, sem explicações.',
     `Extraia as disciplinas e horários deste texto de grade universitária.
 
-TEXTO:
-${gradeText}
+    REGRAS IMPORTANTES:
+    - Cada combinação de disciplina + dia + horário vira um objeto SEPARADO no array.
+    - NUNCA agrupe dois dias diferentes no mesmo objeto se eles tiverem horários diferentes.
+    - Se "Cálculo" tem terça 13h50-15h30 e quarta 10h20-12h00, crie DOIS objetos: um com dias:[2] e outro com dias:[3], cada um com seu próprio horário.
+    - Só agrupe dias no mesmo objeto se o horário de início E fim for IDÊNTICO.
 
-Retorne SOMENTE este JSON (sem backticks, sem texto extra):
-{"curso":null,"semestre":null,"aulas":[{"disciplina":"nome","dias":[1,3],"horario_inicio":"HH:MM","horario_fim":"HH:MM","local":null}]}
-dias: 0=Dom 1=Seg 2=Ter 3=Qua 4=Qui 5=Sex 6=Sáb
-Se não encontrar aulas retorne: {"erro":"não foi possível identificar aulas"}`
-  );
-  return JSON.parse(text.replace(/```json|```/g, '').trim());
+    TEXTO:
+    ${gradeText}
+
+    Retorne SOMENTE este JSON (sem backticks, sem texto extra):
+    {"curso":null,"semestre":null,"aulas":[{"disciplina":"nome","dias":[2],"horario_inicio":"HH:MM","horario_fim":"HH:MM","local":null}]}
+    dias: 0=Dom 1=Seg 2=Ter 3=Qua 4=Qui 5=Sex 6=Sáb
+    Se não encontrar aulas retorne: {"erro":"não foi possível identificar aulas"}`
+    );
+      return JSON.parse(text.replace(/```json|```/g, '').trim());
 }
+
 
 // ─── Format grade ─────────────────────────────────────────────────────────────
 function formatGradeMessage(grade) {
