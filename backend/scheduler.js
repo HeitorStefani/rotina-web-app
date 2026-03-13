@@ -5,10 +5,17 @@ const { sendTelegramMessage } = require('./routes/telegram');
 const DAY_NAMES = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const TYPE_EMOJI = { daily: '🔄', weekly: '📅', unique: '📌', deadline: '⏰' };
 
+// ─── Horário de Brasília ──────────────────────────────────────────────────────
+function getBrasiliaDate() {
+  const now = new Date();
+  const brasiliaOffset = -3 * 60;
+  const utcMinutes = now.getTime() / 1000 / 60 + now.getTimezoneOffset();
+  return new Date((utcMinutes + brasiliaOffset) * 60 * 1000);
+}
+
 function formatEventMessage(event, minutesBefore) {
   const emoji = TYPE_EMOJI[event.type] || '📌';
   const when = minutesBefore === 0 ? 'AGORA' : `em ${minutesBefore} minuto${minutesBefore > 1 ? 's' : ''}`;
-  
   let msg = `${emoji} <b>${event.title}</b> — ${when}`;
   if (event.description) msg += `\n📝 ${event.description}`;
   if (event.time) msg += `\n🕐 Horário: ${event.time}`;
@@ -16,10 +23,9 @@ function formatEventMessage(event, minutesBefore) {
   return msg;
 }
 
-function shouldNotifyToday(event) {
-  const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
-  const dayOfWeek = now.getDay();
+function shouldNotifyToday(event, brasiliaDate) {
+  const todayStr = brasiliaDate.toISOString().split('T')[0];
+  const dayOfWeek = brasiliaDate.getDay();
 
   if (event.type === 'daily') return true;
   if (event.type === 'weekly') {
@@ -27,9 +33,7 @@ function shouldNotifyToday(event) {
     return days.includes(dayOfWeek);
   }
   if (event.type === 'unique') return event.date === todayStr;
-  if (event.type === 'deadline') {
-    return event.deadline_date >= todayStr;
-  }
+  if (event.type === 'deadline') return event.deadline_date >= todayStr;
   return false;
 }
 
@@ -39,7 +43,6 @@ function getEventTime(event) {
 }
 
 function wasRecentlyNotified(db, eventId, userId, scheduledFor) {
-  // Avoid duplicate notifications within 2 minutes
   const recent = db.prepare(`
     SELECT id FROM notification_log
     WHERE event_id = ? AND user_id = ? AND scheduled_for = ?
@@ -49,84 +52,68 @@ function wasRecentlyNotified(db, eventId, userId, scheduledFor) {
 }
 
 function logNotification(db, eventId, userId, scheduledFor) {
-  db.prepare(`
-    INSERT INTO notification_log (event_id, user_id, scheduled_for)
-    VALUES (?, ?, ?)
-  `).run(eventId, userId, scheduledFor);
+  db.prepare(`INSERT INTO notification_log (event_id, user_id, scheduled_for) VALUES (?, ?, ?)`)
+    .run(eventId, userId, scheduledFor);
 }
 
 function startScheduler() {
-  // Run every minute
+  // ── Roda a cada minuto ──
   cron.schedule('* * * * *', async () => {
     const db = getDB();
-    const now = new Date();
-    const hours = now.getHours().toString().padStart(2, '0');
-    const minutes = now.getMinutes().toString().padStart(2, '0');
+    const brasiliaDate = getBrasiliaDate();
+    const hours = brasiliaDate.getHours().toString().padStart(2, '0');
+    const minutes = brasiliaDate.getMinutes().toString().padStart(2, '0');
     const currentTime = `${hours}:${minutes}`;
+    const todayStr = brasiliaDate.toISOString().split('T')[0];
 
-    // Get all active users with telegram configured
-    const users = db.prepare(`
-      SELECT * FROM users WHERE telegram_chat_id IS NOT NULL AND telegram_chat_id != ''
-    `).all();
+    const users = db.prepare(`SELECT * FROM users WHERE telegram_chat_id IS NOT NULL AND telegram_chat_id != ''`).all();
 
     for (const user of users) {
-      const events = db.prepare(`
-        SELECT * FROM events WHERE user_id = ? AND active = 1
-      `).all(user.id);
+      const events = db.prepare(`SELECT * FROM events WHERE user_id = ? AND active = 1`).all(user.id);
 
       for (const event of events) {
-        if (!shouldNotifyToday(event)) continue;
+        if (!shouldNotifyToday(event, brasiliaDate)) continue;
 
         const eventTime = getEventTime(event);
         if (!eventTime) continue;
 
-        // Calculate notification time (event time - notify_minutes_before)
         const [evHour, evMin] = eventTime.split(':').map(Number);
         const notifyMinutes = event.notify_minutes_before ?? user.notify_minutes_before ?? 30;
-        
-        const eventDate = new Date();
+
+        const eventDate = new Date(brasiliaDate);
         eventDate.setHours(evHour, evMin, 0, 0);
         const notifyDate = new Date(eventDate.getTime() - notifyMinutes * 60000);
-        
-        const notifyHour = notifyDate.getHours().toString().padStart(2, '0');
-        const notifyMin = notifyDate.getMinutes().toString().padStart(2, '0');
-        const notifyTime = `${notifyHour}:${notifyMin}`;
+
+        const notifyTime = `${notifyDate.getHours().toString().padStart(2, '0')}:${notifyDate.getMinutes().toString().padStart(2, '0')}`;
 
         if (currentTime !== notifyTime) continue;
 
-        const todayStr = now.toISOString().split('T')[0];
         const scheduledFor = `${todayStr} ${eventTime}`;
-
         if (wasRecentlyNotified(db, event.id, user.id, scheduledFor)) continue;
 
         try {
-          const message = formatEventMessage(event, notifyMinutes);
-          await sendTelegramMessage(user.telegram_chat_id, message);
+          await sendTelegramMessage(user.telegram_chat_id, formatEventMessage(event, notifyMinutes));
           logNotification(db, event.id, user.id, scheduledFor);
-          console.log(`✅ Notificação enviada: [${user.username}] ${event.title} às ${eventTime}`);
+          console.log(`✅ Notificação: [${user.username}] ${event.title} às ${eventTime}`);
         } catch (err) {
           console.error(`❌ Erro ao notificar [${user.username}] evento ${event.id}:`, err.message);
         }
       }
 
-      // Deadline alert: also notify on the deadline day at the deadline time (or 08:00 if no time set)
+      // ── Deadlines ──
       const deadlineEvents = events.filter(e => e.type === 'deadline');
-      const todayStr = now.toISOString().split('T')[0];
-      
       for (const event of deadlineEvents) {
         if (event.deadline_date !== todayStr) continue;
-        
+
         const deadlineTime = event.deadline_time || '08:00';
         const [evHour, evMin] = deadlineTime.split(':').map(Number);
         const notifyMinutes = event.notify_minutes_before ?? user.notify_minutes_before ?? 30;
-        
-        const eventDate = new Date();
+
+        const eventDate = new Date(brasiliaDate);
         eventDate.setHours(evHour, evMin, 0, 0);
         const notifyDate = new Date(eventDate.getTime() - notifyMinutes * 60000);
-        
-        const notifyHour = notifyDate.getHours().toString().padStart(2, '0');
-        const notifyMin = notifyDate.getMinutes().toString().padStart(2, '0');
-        const notifyTime = `${notifyHour}:${notifyMin}`;
+
+        const notifyTime = `${notifyDate.getHours().toString().padStart(2, '0')}:${notifyDate.getMinutes().toString().padStart(2, '0')}`;
 
         if (currentTime !== notifyTime) continue;
 
@@ -144,19 +131,20 @@ function startScheduler() {
     }
   });
 
-  // Daily morning summary at 7:00 AM
-  cron.schedule('0 7 * * *', async () => {
+  // ── Resumo matinal às 7h horário de Brasília = 10h UTC ──
+  cron.schedule('0 10 * * *', async () => {
     const db = getDB();
+    const brasiliaDate = getBrasiliaDate();
+    const todayStr = brasiliaDate.toISOString().split('T')[0];
+    const dayName = DAY_NAMES[brasiliaDate.getDay()];
+
     const users = db.prepare(`SELECT * FROM users WHERE telegram_chat_id IS NOT NULL`).all();
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    const dayName = DAY_NAMES[now.getDay()];
 
     for (const user of users) {
       const events = db.prepare(`SELECT * FROM events WHERE user_id = ? AND active = 1`).all(user.id);
-      const todayEvents = events.filter(shouldNotifyToday);
+      const todayEvents = events.filter(e => shouldNotifyToday(e, brasiliaDate));
 
-      if (todayEvents.length === 0) continue;
+      if (!todayEvents.length) continue;
 
       todayEvents.sort((a, b) => {
         const ta = a.time || a.deadline_time || '23:59';
@@ -180,8 +168,8 @@ function startScheduler() {
     }
   });
 
-  console.log('⏰ Scheduler iniciado — verificando notificações a cada minuto');
-  console.log('☀️ Resumo matinal configurado para 07:00');
+  console.log('⏰ Scheduler iniciado — verificando notificações a cada minuto (horário Brasília)');
+  console.log('☀️ Resumo matinal configurado para 07:00 (Brasília)');
 }
 
 module.exports = { startScheduler };

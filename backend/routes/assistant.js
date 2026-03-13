@@ -97,27 +97,39 @@ async function generateRoutine(context) {
   ).join('\n');
 
   const text = await callGroq(
-    'Você monta rotinas para estudantes universitários e retorna SOMENTE JSON válido, sem markdown, sem explicações.',
-    `Monte uma rotina inteligente para este estudante universitário.
+    `Você é um especialista em produtividade para estudantes universitários. Monta rotinas realistas, inteligentes e personalizadas. Retorna SOMENTE JSON válido, sem markdown, sem explicações, sem backticks.`,
+    `Monte uma rotina DETALHADA e REALISTA para este estudante universitário.
 
-GRADE DE AULAS:
+═══ GRADE DE AULAS PRESENCIAIS ═══
 ${gradeStr}
 
-PREFERÊNCIAS:
+Atenção: os dias acima são FIXOS e IMUTÁVEIS. Não mova nenhuma aula de dia ou horário.
+
+═══ PREFERÊNCIAS DO ESTUDANTE ═══
 - Acorda: ${preferences.wake}
 - Dorme: ${preferences.sleep}
 - Refeições: ${preferences.meals}
 - Estudo/revisão: ${preferences.study}
-- Academia: ${preferences.gym}
+- Academia/exercícios: ${preferences.gym}
 - Cursos extras: ${preferences.courses}
-- Lazer: ${preferences.leisure}
+- Lazer/descanso: ${preferences.leisure}
 
-Distribua atividades nos horários livres sem conflitar com as aulas.
+═══ REGRAS OBRIGATÓRIAS ═══
+1. NUNCA agende nada no horário de uma aula presencial
+2. Academia: máximo 3x por semana, respeite o que o estudante disse. Se disse "não faço", não inclua
+3. Estudo/revisão: distribua nos dias em que há aulas, preferencialmente logo após elas
+4. Refeições: use os horários exatos que o estudante informou
+5. Lazer: reserve o horário que o estudante pediu, não preencha tudo com tarefas
+6. Inclua pelo menos 1 bloco semanal para cada disciplina EaD (Metodologia de Pesquisa, Certificadora da Competência, Inteligência Artificial, Redes de Computadores) — coloque nos dias sem muitas aulas presenciais
+7. Sono: inclua horário de dormir baseado no que o estudante informou
+8. Seja ESPECÍFICO nos títulos: "Revisão de POO 2" em vez de "Estudo", "Academia" apenas nos dias corretos
+9. Notificações: aulas = 30min antes, refeições = 10min antes, academia = 30min antes, lazer/sono = 5min antes
 
 Retorne SOMENTE este JSON (sem backticks, sem texto extra):
-{"resumo":"resumo curto da rotina","eventos":[{"title":"nome","description":null,"type":"daily|weekly","time":"HH:MM","days_of_week":[1,2,3],"notify_minutes_before":15}]}
-type: daily=todo dia, weekly=dias específicos.
-Inclua: aulas, refeições, estudo, academia, cursos, lazer, sono.`
+{"resumo":"descrição personalizada da rotina montada","eventos":[{"title":"nome específico","description":null,"type":"daily|weekly","time":"HH:MM","days_of_week":[1,2,3],"notify_minutes_before":15}]}
+
+type "daily" = acontece todo dia (ex: acordar, refeições)
+type "weekly" = dias específicos da semana (ex: aulas, academia, revisões)`
   );
 
   return JSON.parse(text.replace(/```json|```/g, '').trim());
